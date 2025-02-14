@@ -1,0 +1,257 @@
+---
+title: "Seminar Final Individual Assignment"
+author: "Ryan Feenstra (561424)"
+output: pdf_document
+date: "2024-01-02"
+
+---
+
+```{r, echo=FALSE,warning=FALSE,message=FALSE,error=FALSE}
+AirlineData <- read.csv("AirlineTrain.csv") ##reads the data into R
+library(kableExtra) ##Loads the required libraries
+library(randomForest)
+library(caret)
+library(pROC)
+library(iml)
+library(treeshap)
+library(gridExtra)
+library(pdp)
+```
+**Introduction**
+
+Our current world is one of a very globalized nature. People are interconnected and are able to go on business/leisure trips all over the world. The main reason why we are able to be so globalized, is due to the availability of flights on airplanes. Airplanes allow us to connect to the whole world and are a fascinating mode of transportation due to the multitude of factors that effect the customer satisfaction of a airplane traveler. Factors like passport control, immigration time, type of travel class, luggage, etc., are all factors that travelers take into account when going on a flight. Subsequently, flying is not as simple as just jumping in the car or bus for a trip. Since flying has connections to a plethora of factors, machine learning can be utilized to make accurate predictions whether or not a customer will be satisfied with an airline. Therefore the research question for the report is: How accurate is a random forest model in classifying customer satisfaction for airline companies? In the report, a random forest model will be utilized to predict customer satisfaction based on a range of certain variables.  Furthermore, the random forest model will be supported with a logistic regression to compare the results of the two models, while black box interpretation methods will be implemented to have more interpretable results on a global and local level. These results will highlight how well models are able to predict human responses to the plethora of variables in the airline industry and provides insights that airlines may utilize in order to optimize their products.
+
+
+**Data**
+
+The dataset that is used is an airline passenger satisfaction data set retrieved from Kaggle. The dataset contains 103,904 observations and has 25 variables. The variables are all factors that may affect the customer satisfaction of airline customers. The variables are a mix of categorical and continuous variables. The character variables are all categorical variables that represent attributes like gender, type of travel, and travel class. The integer variables represent aspects like flight distance and arrival delay, but also represent a big group of satisfaction variables, that are all measured on a scale from 1 to 5, where 1 represents low satisfaction and 5 being the highest satisfaction. The target variable is "satisfaction", which is a categorical variable which has levels: "neutral or dissatisfied" and "satisfied". The data does require some pre-processing in order to be ready for the random forest model. Firstly, all the categorical variables need to be turned into factors in order for them to be evaluated in the model. Next, all the N/A values are removed from the data which drops the observations to 103,594. The last pre-processing step is to remove the variables that are not relevant for classification, which include the X and id variables, which are just identification variables. The data consists of more than a 100,000 observations, which is quite computationally expensive to run a random forest model on, so in order to aid the speed of the computation, a random sample of 50,000 observations is taken for the application. 50,000 was chosen as it is still a substantial amount of observations and allows for more efficient hyper parameter tuning, as more tuning parameters can be tried without wasting an excessive amount of computational time.
+
+
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+airline_na <- na.omit(AirlineData) #omits all N/A values
+airline_final <- airline_na[3:25] #Selects only the relevant variables
+
+airline_final$Gender <- as.factor(airline_final$Gender) #Sets variable to a factor
+airline_final$Customer.Type <- as.factor(airline_final$Customer.Type) #Sets variable to a factor
+airline_final$Type.of.Travel <- as.factor(airline_final$Type.of.Travel) #Sets variable to a factor
+airline_final$Class <- as.factor(airline_final$Class) #Sets variable to a factor
+airline_final$satisfaction <- as.factor(airline_final$satisfaction) #Sets variable to a factor
+
+set.seed("777") #Sets the seed
+sample_size_data <- 50000 #Sets the size of the sample
+airline_sampled <- airline_final[sample(1:nrow(airline_final), sample_size_data),] #Randomly selects a sample
+sample_size <- floor(0.6*nrow(airline_sampled)) #Sets the 60 % split for the data
+choice = sample(seq_len(nrow(airline_sampled)),size=sample_size) #Splits the data into 2 sets
+train = airline_sampled[choice, ] #Assigns one section of the data to the train set
+test = airline_sampled[-choice,] #Assigns one section of the data to the test set
+
+```
+
+
+**Methods**
+
+
+The first step of the method is to split the data into a test and train set. The split that was chosen for the data was a 60% train and 40% test set. Since the amount of observations is so large it was possible to allow for a larger test set than usual, while still having a sizable train set, and therefore the 60-40 split was chosen compared to 70-30 or 80-20. The next section of the method is the setup of the random forest model. The first thing that needs to be done is the tuning of the hyper parameters. In the report the amount of variables considered at each split will be tuned. The general consensus for a classification problem, is to take the square root of the amount of variables as the value for the split, in the case of the data used in the report, this number will be 4.8. Therefore, in order to try and find the variable per split that leads to the highest accuracy, the numbers 4,5, and 6 will be used. Next, the random forest model with the highest accuracy will be used as the model for classification. In addition the amount of trees and the error rates will be plotted in order to examine if 500 trees is enough for the model, or if more trees are needed in order to drop the error rate. In addition, the random forest model is put through a 5 fold cross validation in order to obtain a model with the highest accuracy. After the random forest model has been applied to the train data, a prediction is made on the test data and a confusion matrix with the relevant statistics will be constructed. The next step of the method is to benchmark the random forest model to a more simple logistic regression. The logistic regression will be conducted on the train dataset and a prediction will be made on the test dataset, the resulting confusion matrix and metrics will be bench marked against the random forest results, in order to visualize if the use of a sophisticated random forest method does actually lead to more accurate results. The last step of the method is to add interpretability to our model. In order to add interpretation for our black box random forest model, local and global interpretation methods will be used. Firstly, a variable importance plot will be constructed, in order to visualize which variables are the most important in the classification process. The variable importance is measured through the mean decrease in Gini impurity. Next, partial dependence plots will be constructed for the top 5 variables in terms of importance. The partial dependence plots will illustrate how certain variables impact the target variable, given that those predictors are independent from all other predictor variables. The last global interpretation method that will be utilized is the global surrogate model. In the report, a logistic regression model will be used as a surrogate model in order to try and reproduce the results of the black box method, while having a much higher degree of interpretation. The global surrogate will be trained on a set of 20,000 observations and will be used to predict on the test set. The last step of the method is the local interpretation of results. In the report, SHAP values will be utilized to dive deeper into the results of individual predictions and aim to uncover why the model predicted certain results. 
+
+**Analyses & Results**
+
+The first set of results to dive into are the results of the random forest model. Firstly, the accuracy of each model with the different amount of variables per split will be shown. 
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+##Random Forest Implementation
+mtry_val <- expand.grid(mtry = c(4:6)) #Sets the grid of variables per split to try
+
+rf_model <- train(satisfaction ~ ., data = train, method = "rf",trControl = trainControl(method = "cv", number = 5), tuneGrid = mtry_val) #Runs the random forest model
+
+results_df <- data.frame("Amount of Variables Used" = rf_model$results[1], "Accuracy" = round(rf_model$results[2],3)) #Makes a data frame of the results 
+
+kable(results_df, caption = "Accuracy of Random Forest Models with differing variables per split") %>%
+  kable_styling(latex_options = "HOLD_position") #Prints the table with kable styling
+```
+As we can see from Table 1, the random forest model with 6 variables used per split leads to the highest accuracy of 96%. Therefore the random forest model with 6 variables per split will be utilized for the predictions later on. Before the predictions can be investigated, it is important to validate if the amount of trees used in the random forest is adequate.
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+plot(rf_model$finalModel, main = "Figure 1: Error Rates against number of trees") #Plots the error rates of the random forest model
+```
+As seen from Figure 1, the error rate seems to stabilize at around a 150 to 500 trees, therefore it is adequate to use 500 trees in the random forest predictor model. 
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+predictions_airline <- predict(rf_model, newdata = test) #Makes the predictions of the random forest model
+confusion_matrix <- table(Predicted = predictions_airline, Actual = test$satisfaction) #Creates the confusion matrix
+kable(confusion_matrix, caption =  "Confusion Matrix for Random Forest Model") %>%
+  kable_styling(latex_options = "HOLD_position") #Prints the table with kable styling
+
+accuracy <- round((confusion_matrix[1] + confusion_matrix[4]) / sum(confusion_matrix),2) #Computes accuracy
+precision <- round(confusion_matrix[4] / (confusion_matrix[4] + confusion_matrix[2]),2) #Computes precision
+recall_TP <- round(confusion_matrix[4] / (confusion_matrix[4] + confusion_matrix[3]),2) #Computes recall
+specificity_TN <- round(confusion_matrix[1] / (confusion_matrix[1] + confusion_matrix[2]),2) #Computes specificity
+f1_score <- round(2 * (precision * recall_TP) / (precision + recall_TP),2) #Computes F1 score
+airline_metrics <- data.frame(Accuracy = accuracy, Precision = precision, Recall = recall_TP, Specificity = specificity_TN,
+                              F1Score = f1_score) #Puts all the metrics in a data frame
+kable(airline_metrics, caption = "Relevant Metrics for Random Forest Confusion Matrix") %>%
+  kable_styling(latex_options = "HOLD_position") #Prints the table with kable styling
+
+```
+
+From the confusion matrix in Table 2 and the metrics in Table 3, it is clear that the random forest model is extremely accurate in the prediction of the airline satisfaction. The accuracy of the model is at 96%, which represents that the model was able in 96% of cases to predict the right class, which is very high. Furthermore, the Precision is at 96%, showing that of all the predictions that the model had made as "satisfied" (The true positives and false positives) 96% of those truly were "satisfied". Next, the recall shows the ratio of true positives compared to all actual positive predictions which are the true positives and false negatives, and the model shows that 94% of those positive predictions were actually true positive "satisfied" predictions. Next the specificity is at 97% which indicates that the model is able to discern between true negatives and false positives, therefore predicting "neutral or dissatisfied" correctly with a rate of 97%. The F1-Score shows the balance between precision and recall and is measured on a scale of 0 to 1, where 1 represents good balance and 0 the lowest balance. The value of 0.95 for the F1 score shows that there is a very good balance between the precision and recall of the random forest model. 
+
+
+The Random Forest models seems to have very accurate and robust results, however, it aids to put these results into context by benchmarking the results against simpler, less sophisticated models, in order to gain an insight on the strength of the Random forest. The Random Forest model will be compared to a standard logistic regression model, with a 5 fold cross validation. 
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+##Logistic Model Comparison
+logistic_model <- train(satisfaction ~., data = train, method = "glm", trControl = trainControl(method = "cv", number = 5), family = "binomial") #Trains and runs the logistic model
+predictions_airline_logistic <- predict(logistic_model, newdata = test) #makes the logistic model predictions
+
+confusion_matrix_log <- table(Predicted = predictions_airline_logistic, Actual = test$satisfaction) #Makes the logistic model confusion matrix
+kable(confusion_matrix_log, caption = "Confusion Matrix for Logistic Regression") %>%
+  kable_styling(latex_options = "HOLD_position") #Prints the table with kable styling
+
+accuracy_log <- round((confusion_matrix_log[1] + confusion_matrix_log[4]) / sum(confusion_matrix_log),2) #Computes accuracy
+precision_log <- round(confusion_matrix_log[4] / (confusion_matrix_log[4] + confusion_matrix_log[2]),2) #Computes precision
+recall_TP_log <- round(confusion_matrix_log[4] / (confusion_matrix_log[4] + confusion_matrix_log[3]),2) #Computes recall
+specificity_TN_log <- round(confusion_matrix_log[1] / (confusion_matrix_log[1] + confusion_matrix_log[2]),2) #Computes specificity
+f1_score_log <- round(2 * (precision_log * recall_TP_log) / (precision_log + recall_TP_log),2) #Computes f1-score
+airline_metrics_log <- data.frame(Accuracy = accuracy_log, Precision = precision_log, Recall = recall_TP_log, Specificity = specificity_TN_log,
+                              F1Score = f1_score_log) #Puts all metrics in a data frame
+kable(airline_metrics_log, caption = "Metrics for Logistic Regression") %>%
+  kable_styling(latex_options = "HOLD_position") #Prints the table with kable styling
+```
+Based on the Confusion matrix in Table 4 and the related metrics in Table 5, it is clear that the Logistic model performs worse than the Random forest model in every metric, however, it does still have a high overall accuracy at 87%, meaning that even a model with a lot lower complexity is able to handle the data quite well. Overall, it is clear to see however, that the random forest model is superior.
+
+
+Even though the Random forest model is superior to the logistic regression model, it does lack one key feature which is interpretability. Due to the sheer amount of trees being used in a random forest, it is hard to understand why the random forest makes certain decisions regarding the classification of the target variable and how exactly it came to the conclusion, hence, it being a black box model. In order to shine some more light on the black box model and make it clearer, global and local interpretation methods are used to provide interpretability. 
+
+Firstly, the variable importance plot will be analyzed.
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+##Black Box Interpretation
+#add var imp plot with the other axes
+varImpPlot(rf_model$finalModel, main = "Figure 2: Variable Importance") #prints the variable importance plot
+```
+
+
+As seen from Figure 2, the most important variables in deciding customer satisfaction are Online boarding, having an inflight WiFi service, the type of travel being personal travel, travelling in economy class, and the inflight entertainment. The satisfaction of the online boarding being the most important does seem to match theory as online boarding allows for customers to have a more smooth check in at the airport and can speed up the time that customers spend waiting in the airport. Furthermore, inflight entertainment and WiFi having a lot of importance also makes sense as inflight entertainment and WiFi are the main ways people spend their time on an airplane, especially on long haul flights, so it is reasonable that these factors would be deemed important in satisfaction. Lastly, travelling in economy class and personal travel are also very important, which could be related to the fact that the majority of flights are personal travel and have the most travellers in economy class compared to all other classes. Furthermore, based on the study by (Bogicevic et al., 2013), which benchmarked airport factors, aspects like WiFi and Check-in are prominent dissatisfiers, which matches the results as they indicate that these factors have high importance.
+
+The least important variables are Gender, travelling in Eco plus, food and drink, and departure delay. Gender and travelling in Eco plus being relatively not important is plausible as there is no difference in flying experience based on gender, while Eco plus is a class that is not as popular as Economy class, and not all airlines or types of airplanes even have the service available. However, food and drink and departure delay being relatively less important is a bit of an interesting result, as it could be assumed that delays play a big part in satisfaction due to the disruptions they cause to travel, and food and drink being good or bad could be assumed to also have part to play in satisfaction. One way to explain the results could be that since the results come from a US airline survey, it may be the case that the airlines used for the survey do not suffer much from delays and subsequently their customers would not find it a huge issue. 
+
+In order to gain more insights on the relationship between the most important variables and the target variable, partial dependence plots will be plotted. The partial dependence plots that will be shown are two dimensional partial dependence plots where online boarding is plotted along with in-flight WiFi service and in-flight entertainment, which are variables with high importance. Online boarding will also be plotted along with Food and drink and gate location, which are variables with low importance. The partial dependence plots will therefore be two dimensional plots that show how online boarding interacts with the high and low importance variables and how it determines the satisfaction level. The partial dependence plots assume independence between the variables in the plot and all the other variables in the model. 
+
+```{r, warning=FALSE,echo=FALSE,error=FALSE}
+pdp1v2 <- partial(rf_model, pred.var = c("Online.boarding","Inflight.wifi.service") , chull = TRUE) #Makes a partial dependence plot
+plot1v2 <- autoplot(pdp1v2, contour = TRUE, legend.title = "Partial Dependence") + ggtitle("Figure 3: Partial Dependence Plot for\n Online Boarding and Inflight Wifi") + theme(plot.title = element_text(size = 7)) #Plots the partial dependence plot 
+
+
+pdp1v3 <- partial(rf_model, pred.var = c("Online.boarding", "Food.and.drink"), chull = TRUE) #Makes a partial dependence plot
+plot1v3 <- autoplot(pdp1v3, contour = TRUE, legend.title = "Partial Dependence") + ggtitle("Figure 6: Partial Dependence Plot for\n Online Boarding and Food and Drink") + theme(plot.title = element_text(size = 7)) #plots the partial dependence plot
+
+
+pdp1v4 <- partial(rf_model, pred.var = c("Online.boarding", "Gate.location"), chull = TRUE) #Makes a partial dependence plot
+plot1v4 <- autoplot(pdp1v4, contour = TRUE, legend.title = "Partial Dependence") + ggtitle("Figure 5: Partial Dependence Plot for\n Online Boarding and Gate Location") + theme(plot.title = element_text(size = 7)) #Plots the partial dependence plot
+
+
+
+pdp1v5 <- partial(rf_model, pred.var = c("Online.boarding", "Inflight.entertainment"), chull = TRUE) #Makes a partial dependence plot
+plot1v5 <- autoplot(pdp1v5, contour = TRUE, legend.title = "Partial Dependence") + ggtitle("Figure 4: Partial Dependence Plot for\n Online Boarding and Inflight Entertainment") + theme(plot.title = element_text(size = 7)) #Plots the partial dependence plot
+
+
+
+grid.arrange(plot1v2,plot1v5,plot1v4,plot1v3, ncol = 2)
+```
+Figure 3 and 4 show the partial dependence for Online boarding on in-flight service and in-flight entertainment. Firstly, Figure 3 shows that Online boarding and in-flight service have the highest partial dependence on satisfaction in the yellow area of the plot. The yellow area is where Online boarding and in-flight service both are at the 2nd out of 5 levels of satisfaction. The dependence stays high around the yellow/green areas of the plot, but when the online boarding starts to reach the 5th level of satisfaction, the partial dependence drops, regardless of the satisfaction level of in-flight service. Figure 4 shows the partial dependence for Online boarding and in-flight entertainment. In Figure 4, when Online boarding is in the 1-3 satisfaction level, the partial dependence on satisfaction is at its highest point, However, when Online boarding is in the 4 or 5th satisfaction level and in-flight entertainment rises in satisfaction, then the partial dependence is at its lowest. Overall, it is hard to see a trend in the partial dependence for the variables.
+
+Figure 5 and 6 show the partial dependence between Online boarding and Gate location and Food and drink. Firstly, Figure 5 shows that as the satisfaction level of Online.boarding increases the partial dependence is at its lowest, no matter what the satisfaction level of Gate location is. The interpretation of the figure is that no matter what the satisfaction level of the Gate location is, if the satisfaction level of Online boarding increases, then the partial dependence will be at it's lowest, signifying that gate location does not have much of an impact, which reflects the results of the variable importance plot. Figure 6 highlights the partial dependence between Online boarding satisfaction and Food and drink satisfaction. A similar trend emerges, where the partial dependence decreases when the satisfaction level of Online boarding increases. Again it seems that Online boarding satisfaction is much more important than the satisfaction of Food and drink as the partial dependence is at its lowest when Online boarding satisfaction is at level 5 and food and drink satisfaction is at level 2 till 4. Overall, the results of Figure 5 and 6 highlight the relative importance of online boarding satisfaction compared to gate location and food and drink satisfaction. 
+
+
+After exploring the random forest model itself with some interpretation techniques, in order to gain a better understanding of the black box model, a global surrogate logistic regression model will be utilized. In order to construct the surrogate model, the surrogate logistic model is trained on the predictions of the random forest model, and it yielded these results:
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+#Global Surrogate
+
+#logistic regression
+sample_size_data_x <- 20000 #Sets the sample size for the surrogate model
+X <- airline_final[sample(1:nrow(airline_final), sample_size_data_x),] #Gets the random sample
+rf_bb_predictions <- predict(rf_model, newdata = X) #Makes the random forest model predictions
+
+X$satisfaction <- rf_bb_predictions #Assigns the random forest model predictions to the surrogate model
+
+surrogate_logistic_model <- train(satisfaction ~., data = X, method = "glm", trControl = trainControl(method = "cv", number = 5), family = "binomial") #Trains and runs the surrogate model
+
+surrogate_coefficients <- coef(summary(surrogate_logistic_model$finalModel)) #Extracts the surrogate model coefficients
+surrogate_df <- data.frame(Estimate = round(surrogate_coefficients[, "Estimate"],2), Pvalue =  round(surrogate_coefficients[,"Pr(>|z|)"],2), Significance = ifelse(surrogate_coefficients[, "Pr(>|z|)"] < 0.05, "*", "")) #Makes a data frame with all the surrogate coefficients and checks if the p value is less than 0.05. If yes a significance star is added
+
+
+kable(surrogate_df, caption = "Surrogate Model Regression Results") %>%
+  kable_styling(latex_options = "HOLD_position") #Prints the table with kable styling
+```
+Table 6 shows the summary of the logistic regression, all significant variables (P < 0.05) are marked with a star. Based on the results from Table 6, it is clear that a large amount of the variables are significant in predicting the satisfaction, in addition all the variables that are marked as not significant are the same variables that had the lowest importance based on the variable importance plot, clearly showing that the logistic model is able to mirror the random forest model to a certain extent. It is clear to see that a multitude of variables are significant in the classification of passenger satisfaction and that these variables should be targeted by airlines in order to improve the overall passenger satisfaction. 
+
+The next set of results will be the confusion matrix of the logistic model and the relevant metrics. 
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+surrogate_predictions <- predict(surrogate_logistic_model, newdata = test) #Makes the surrogate model predictions
+confusion_matrix_surrogate <- table(Predicted = surrogate_predictions, Actual = test$satisfaction) #Creates the surrogate model confusion matrix
+
+kable(confusion_matrix_surrogate, caption =  "Surrogate Model Confusion Matrix") %>%
+  kable_styling(latex_options = "HOLD_position") #Prints the table with kable styling
+
+accuracy_surrogate <- round((confusion_matrix_surrogate[1] + confusion_matrix_surrogate[4]) / sum(confusion_matrix_surrogate),2) #Computes accuracy
+precision_surrogate <- round(confusion_matrix_surrogate[4] / (confusion_matrix_surrogate[4] + confusion_matrix_surrogate[2]),2) #Computes precision
+recall_TP_surrogate <- round(confusion_matrix_surrogate[4] / (confusion_matrix_surrogate[4] + confusion_matrix_surrogate[3]),2) #Computes recall
+specificity_TN_surrogate <- round(confusion_matrix_surrogate[1] / (confusion_matrix_surrogate[1] + confusion_matrix_surrogate[2]),2) #Computes specificity
+f1_score_surrogate <- round(2 * (precision_surrogate * recall_TP_surrogate) / (precision_surrogate + recall_TP_surrogate),2) #Computes f1-score
+airline_metrics_surrogate <- data.frame(Accuracy = accuracy_surrogate, Precision = precision_surrogate, Recall = recall_TP_surrogate, Specificity = specificity_TN_surrogate,
+                              F1Score = f1_score_surrogate) #Puts the metrics in a data frame
+kable(airline_metrics_surrogate, caption = "Metrics for Surrogate Model") %>%
+  kable_styling(latex_options = "HOLD_position") #Prints the table with kable styling
+```
+Table 7 shows the confusion matrix for the surrogate model, while Table 8 highlights the relevant metrics. On the whole the surrogate model scores lower in every metric compared to the random forest model, and the surrogate model scores almost identical to the generic logistic regression conducted at the very start of the report, however, the surrogate does have a 1% increase in accuracy. On the whole, the surrogate model is still able to classify correctly 88% of the time, which is still a very strong benchmark and the surrogate model allows for greater interpretability of the random forest model. 
+
+
+The last set of results are the local interpretation results of the random forest model. Shapley values are utilized in order to visualize how a certain observation was classified. SHAP values originate from game theory and aim to highlight which predictors caused an observation to get a certain classification. The SHAP results in figure 7 show the marginal contribution of the variables in predicting the classification of a result as 'satisfied' or 'neutral or dissatisfied'. 
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+#Local Interpretation (SHAP_Conditional Inference)
+X <- test[which(names(test) != "satisfaction")] #Removes the target variable from the dataset
+predictor <- Predictor$new(rf_model, data = X, y = test$satisfaction) #Creates a predictor object
+sample_point_1 <- X[1,] #Selects a point for the SHAP analysis
+shapley <- Shapley$new(predictor, x.interest = sample_point_1) #Creates a SHAP object
+shapley$plot() + ggtitle("Figure 7: SHAP Values for Data Point 1 ") #Plots the SHAP results
+```
+
+The first data point that was selected is the first data point in the dataset and was classified as 'neutral or dissatisfied'. The classification can be seen in Figure 7 which shows the SHAP values for all the predictors and how they contributed into classifying the data point. The plot indicates that the variable that is driving the classification the most towards 'neutral or dissatisfied' is the satisfaction of the in flight WiFi being at a 3. Since the individual in the data point is only 14 years old, it may be the case that having something like WiFi on a flight is very important and therefore the satisfaction level not being higher is causing the individual to be much more dissatisfied with the flight. In addition, inflight WiFi was one of the features that had the highest importance in the variable importance plot. Furthermore, the customer is also a disloyal customer and in combination with the individual being 14 years old, it indicates that they do not have much personal connection to the airline and therefore are pushed towards the "neutral or dissatisfied" classification. A variable that is slightly pushing the classification towards 'satisfied' is that the type of travel was in business class, which indicates a higher level of comfort and luxury, which can definitely improve the satisfaction of travel. 
+
+
+```{r, echo=FALSE,message=FALSE,error=FALSE,warning=FALSE}
+sample_point_2 <- X[2,] #Selects a point for SHAP analysis
+shapley2 <- Shapley$new(predictor, x.interest = sample_point_2) #makes a new SHAP object
+shapley2$plot() + ggtitle("Figure 8: SHAP values for Data point 2") #Plots the SHAP analysis
+```
+
+
+The next data point shows a customer that was classified as 'satisfied'. The customer shown in Figure 8 is very different compared to the first data point, this customer is a 51 year old female that is flying on a business trip. In this situation it is clear that this passenger's classification is mostly determined by the fact that the type of trip is business, which means that factors like high satisfaction of check in service and online boarding are also very important in classifying this passenger as satisfied, due to the fact that this passenger may want to travel in comfort and luxury and value speed as they need to reach their next business destination. The customer is also a loyal customer which indicates that they would be flying on this airline a lot and be accustomed to the level of service and luxury that is provided. The only factor that slightly is pushing the classification towards 'neutral or dissatisfied' is the satisfaction of the departure arrival time being a 4, which again is most likely due to the nature of business trips needing to be fast and convenient. 
+
+**Limitations**
+
+One of the main limitations is the data used for the analysis. The data is for airlines in the United States only, and therefore the conclusions of the research can only be applied to the American aviation industry. It could be possible that factors that are important to American travellers differ vastly from the needs of European or Asian travellers. Therefore, a follow up approach to the study could be to investigate data sets of travellers worldwide, in order to present more applicable policy recommendations. Furthermore, the data set does not specify the time period of when the data was collected, therefore, it may be outdated compared to the contemporary needs of passengers, or the data may have been collected during the COVID-19 pandemic which had detrimental effects on the aviation industry, which are still being felt today. Another data issue is that there may be features that were not recorded in the dataset but may have a profound impact on the satisfaction of passengers. The last data issue is that the target variable of satisfaction was split into 'satisfied' and 'neutral or dissatisfied', which leads to confusion as to whether a passenger was dissatisfied or neutral. Therefore, a way to improve the report would be to split the problem into three classifications which include 'satisfied', 'neutral', and 'dissatisfied'. The main limitation however is the black box nature of the random forest model (Palczewska, 2014). Even though local and global interpretation techniques were utilized in order to add more interpretability, the methods are not a 100% accurate and there could still be aspects of the random forest model that cannot be clearly explained and add ambiguity to the results. In addition, there were also a lot of predictors present in the model, in order to get a more in-depth explanation, variable selection techniques like the Vsurf package could be used (Speiser, 2019).
+
+**Conclusions**
+
+
+Overall, the main aim of the report was to apply the concepts of a random forest model in order to accurately classify the satisfaction level of airline passengers. Looking back, the research question of the report was: How accurate is a random forest model in classifying customer satisfaction for airline companies? Based on the results of the random forest, it is clear to see that the random forest model is extremely accurate in classifying, as the accuracy of the model is at 96% and all other relevant metrics reach above 90%. However, the main issue that plagues the research is the issue of interpretability of the model. The random forest model used in the report is a clear example of a black box model, which means that the inner workings of the model are hard to interpret (Palczewska, 2014). In order to get around the issue of interpretability, various techniques were used like variable importance plots and partial dependence plots in order to gain more of an understanding into which variables affected the classification the most. In addition, a logistic model was used as a global surrogate model to try and reproduce the results of the random forest, which allowed for greater interpretability at the cost of accuracy. Furthermore, SHAP values were used on individual predictions in order to gain insights on how individual predictions were classified. Ultimately, the question of interpretability over accuracy remains. In order to make insightful policy decisions, the recommended choice of model should be the logistic global surrogate model, as it still had an accuracy of 88% and had much greater interpretability than the base random forest model, and will allow airliners to gauge the satisfaction of their customers and subsequently be able to target factors that are shown to reduce satisfaction. 
+
+**References**
+
+Bogicevic, Vanja, et al. “Airport service quality drivers of passenger satisfaction.” Tourism Review, vol. 68, no. 4, 2013, pp. 3–18, https://doi.org/10.1108/tr-09-2013-0047. 
+
+Klein, T. (2020, February 20). Airline passenger satisfaction. Kaggle. https://www.kaggle.com/datasets/teejmahal20/airline-passenger-satisfaction/data 
+
+Molnar, C. (2023, August 21). Interpretable machine learning. 8.6 Global Surrogate. https://christophm.github.io/interpretable-ml-book/global.html 
+
+Palczewska, Anna, et al. “Interpreting random forest classification models using a feature contribution method.” Integration of Reusable Systems, 2014, pp. 193–218, https://doi.org/10.1007/978-3-319-04717-1_9. 
+
+Speiser, Jaime Lynn, et al. “A comparison of random forest variable selection methods for classification prediction modeling.” Expert Systems with Applications, vol. 134, 2019, pp. 93–101, https://doi.org/10.1016/j.eswa.2019.05.028. 
+
+
